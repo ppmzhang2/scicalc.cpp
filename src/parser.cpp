@@ -5,20 +5,20 @@
 
 namespace {
 
-    static constexpr int8_t K_BP_DELTA =
-        10; // binding power delta for parenthesis
+    // binding power delta for parenthesis
+    static constexpr int8_t K_BP_DELTA = 10;
 
     // Binding power for infix operators
-    std::pair<uint8_t, uint8_t> get_bp_infix(parser::Operator op) {
+    std::pair<uint8_t, uint8_t> get_bp_infix(parser::Sign op) {
         switch (op) {
-        case parser::Operator::ADD:
-        case parser::Operator::SUB:
-            return {1, 2};
-        case parser::Operator::MUL:
-        case parser::Operator::DIV:
-            return {3, 4};
-        case parser::Operator::EXP:
-            return {6, 5};
+        case parser::Sign::ADD:
+        case parser::Sign::SUB:
+            return {1, 1};
+        case parser::Sign::MUL:
+        case parser::Sign::DIV:
+            return {2, 2};
+        case parser::Sign::EXP:
+            return {4, 3};
         default:
             throw std::runtime_error("Unknown operator for binding power");
         }
@@ -36,19 +36,19 @@ namespace {
     uint8_t char2op(char c) {
         switch (c) {
         case '+':
-            return static_cast<uint8_t>(parser::Operator::ADD);
+            return static_cast<uint8_t>(parser::Sign::ADD);
         case '-':
-            return static_cast<uint8_t>(parser::Operator::SUB);
+            return static_cast<uint8_t>(parser::Sign::SUB);
         case '*':
-            return static_cast<uint8_t>(parser::Operator::MUL);
+            return static_cast<uint8_t>(parser::Sign::MUL);
         case '/':
-            return static_cast<uint8_t>(parser::Operator::DIV);
+            return static_cast<uint8_t>(parser::Sign::DIV);
         case '^':
-            return static_cast<uint8_t>(parser::Operator::EXP);
+            return static_cast<uint8_t>(parser::Sign::EXP);
         case '(':
-            return static_cast<uint8_t>(parser::Operator::PAL);
+            return static_cast<uint8_t>(parser::Sign::PAL);
         case ')':
-            return static_cast<uint8_t>(parser::Operator::PAR);
+            return static_cast<uint8_t>(parser::Sign::PAR);
         default:
             throw std::runtime_error(std::string("Unknown operator ") + c);
         }
@@ -67,13 +67,13 @@ namespace {
                 int value = str2int(str);
                 tokens.emplace_back(value);
             } else {
-                auto op = static_cast<parser::Operator>(char2op(*str));
+                auto op = static_cast<parser::Sign>(char2op(*str));
 
-                if (op == parser::Operator::PAL) {
+                if (op == parser::Sign::PAL) {
                     ++lpar;
                     ++str;
                     continue;
-                } else if (op == parser::Operator::PAR) {
+                } else if (op == parser::Sign::PAR) {
                     if (lpar == 0)
                         throw std::runtime_error("Unmatched right parenthesis");
                     --lpar;
@@ -113,10 +113,10 @@ std::shared_ptr<parser::Expr> parser::Raw::parse(uint8_t min_bp) {
         if (next.type != parser::TokenType::OP)
             throw std::runtime_error("Expected operator");
 
-        parser::Operator op = static_cast<parser::Operator>(next.value);
+        parser::Sign op = static_cast<parser::Sign>(next.value);
         uint8_t l_bp = next.lbp;
         uint8_t r_bp = next.rbp;
-        if (l_bp < min_bp)
+        if (l_bp <= min_bp)
             break;
 
         this->next(); // consume operator

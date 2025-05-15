@@ -11,15 +11,15 @@ namespace parser {
         OP,
     };
 
-    enum class Operator : uint8_t {
+    enum class Sign : uint8_t {
         NONE = 0,
         ADD, // +
         SUB, // -
         MUL, // *
         DIV, // /
         EXP, // ^
-        PAL,
-        PAR,
+        PAL, // (
+        PAR, // )
     };
 
     struct Token {
@@ -37,34 +37,33 @@ namespace parser {
     };
 
     struct Expr {
-        Operator op;
+        Sign op;
         int value;
         std::shared_ptr<Expr> lhs;
         std::shared_ptr<Expr> rhs;
 
-        Expr(int v)
-            : op(Operator::NONE), value(v), lhs(nullptr), rhs(nullptr) {}
+        Expr(int v) : op(Sign::NONE), value(v), lhs(nullptr), rhs(nullptr) {}
 
-        Expr(Operator o, std::shared_ptr<Expr> l, std::shared_ptr<Expr> r)
+        Expr(Sign o, std::shared_ptr<Expr> l, std::shared_ptr<Expr> r)
             : op(o), lhs(std::move(l)), rhs(std::move(r)) {}
 
         float eval() const {
-            if (op == Operator::NONE)
+            if (op == Sign::NONE)
                 return value;
 
             float l = lhs->eval();
             float r = rhs->eval();
 
             switch (op) {
-            case Operator::ADD:
+            case Sign::ADD:
                 return l + r;
-            case Operator::SUB:
+            case Sign::SUB:
                 return l - r;
-            case Operator::MUL:
+            case Sign::MUL:
                 return l * r;
-            case Operator::DIV:
+            case Sign::DIV:
                 return l / r;
-            case Operator::EXP:
+            case Sign::EXP:
                 return std::pow(l, r);
             default:
                 throw std::runtime_error("Unknown operator in eval");
