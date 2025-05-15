@@ -1,0 +1,18 @@
+# general things to ignore
+.DS_Store
+build/
+build_contrib/
+.cache/
+*.so
+*~
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+include/config.h
+*.out
+
+# IDE
+.vscode/

@@ -1,0 +1,4 @@
+#pragma once
+#define VERSION_MAJOR @SciCalc_VERSION_MAJOR@
+#define VERSION_MINOR @SciCalc_VERSION_MINOR@
+#define VERSION_PATCH @SciCalc_VERSION_PATCH@
