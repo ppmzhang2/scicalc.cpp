@@ -11,13 +11,29 @@ TEST(PARSER, ParseRaw) {
     float ans3 = -19;
     float ans4 = 15;
 
-    parser::Raw raw1(srt1);
-    parser::Raw raw2(srt2);
-    parser::Raw raw3(srt3);
-    parser::Raw raw4(srt4);
+    auto pairs1 = parser::str2pairs(srt1);
+    auto pairs2 = parser::str2pairs(srt2);
+    auto pairs3 = parser::str2pairs(srt3);
+    auto pairs4 = parser::str2pairs(srt4);
 
-    EXPECT_EQ(ans1, raw1.parse(0)->eval());
-    EXPECT_EQ(ans2, raw2.parse(0)->eval());
-    EXPECT_EQ(ans3, raw3.parse(0)->eval());
-    EXPECT_EQ(ans4, raw4.parse(0)->eval());
+
+    auto tokens1 = parser::pairs2tokens(pairs1);
+    auto tokens2 = parser::pairs2tokens(pairs2);
+    auto tokens3 = parser::pairs2tokens(pairs3);
+    auto tokens4 = parser::pairs2tokens(pairs4);
+
+    std::reverse(tokens1.begin(), tokens1.end());
+    std::reverse(tokens2.begin(), tokens2.end());
+    std::reverse(tokens3.begin(), tokens3.end());
+    std::reverse(tokens4.begin(), tokens4.end());
+
+    auto expr1 = parser::parse(tokens1, 0);
+    auto expr2 = parser::parse(tokens2, 0);
+    auto expr3 = parser::parse(tokens3, 0);
+    auto expr4 = parser::parse(tokens4, 0);
+
+    EXPECT_EQ(ans1, expr1->eval());
+    EXPECT_EQ(ans2, expr2->eval());
+    EXPECT_EQ(ans3, expr3->eval());
+    EXPECT_EQ(ans4, expr4->eval());
 }
