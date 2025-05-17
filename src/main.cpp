@@ -12,12 +12,10 @@ int main() {
             break;
 
         try {
-            auto pairs = parser::str2pairs(input.c_str());
-            auto tokens = parser::pairs2tokens(pairs);
-            std::reverse(tokens.begin(), tokens.end());
-            auto expr = parser::parse(tokens, 0);
-
-            float value = expr->eval();
+            auto pairs = parser::str2atoms(input.c_str());
+            auto tokens = parser::atoms2tokens(pairs);
+            auto zp = parser::tokens2chain(tokens, nullptr, true);
+            float value = parser::eval(zp);
             std::cout << value << std::endl;
         } catch (std::exception &ex) {
             std::cerr << "Error: " << ex.what() << std::endl;

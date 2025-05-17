@@ -4,86 +4,62 @@
 
 namespace parser {
 
-    enum class TknType : uint8_t {
-        NONE = 0,
-        NUM,
-        OP,
-    };
-
-    // Both operatoers (left, right and infix) and helpers (parentheses)
-    enum class Sign : uint8_t {
-        NONE = 0,
-        PAL, // (, helper only
-        PAR, // ), helper only
-        PI,  // pi
-        E,   // e
-        FCT, // !
-        LN,  // ln
-        ADD, // +
-        SUB, // -
-        MUL, // *
-        DIV, // /
-        EXP, // ^
+    struct Atom {
+        bool sign;
+        float value; // IMP: enum class Sign
     };
 
     struct Token {
-        int value; // either a number or a sign
-        TknType type;
-        uint8_t lbp;
-        uint8_t rbp;
-        uint8_t padding;
+        struct Op {
+            uint8_t v;   // IMP: enum class Sign
+            uint8_t lbp; // left binding power
+            uint8_t rbp; // right binding power
+            char padding[1];
+        };
 
-        Token() : value(0), type(TknType::NONE), lbp(0), rbp(0), padding(0) {}
-        Token(int v)
-            : value(v), type(TknType::NUM), lbp(0), rbp(0), padding(0) {}
-        Token(int v, uint8_t lbp, uint8_t rbp)
-            : value(v), type(TknType::OP), lbp(lbp), rbp(rbp), padding(0) {}
+        bool isop;
+        union {
+            float num; // either a number or a sign
+            Op op;     // operator
+        };
+
+        Token(float v) : isop(false), num(v) {}
+        Token(uint8_t v, uint8_t lbp, uint8_t rbp)
+            : isop(true), op{v, lbp, rbp, {0}} {}
 
         std::string ToStr() const {
-            switch (type) {
-            case TknType::NUM:
-                return std::string("Num: " + std::to_string(value));
-            case TknType::OP:
-                return std::string("Op: " + std::to_string(value) + " LBP" +
-                                   std::to_string(lbp) +
-                                   ", "
-                                   " RBP" +
-                                   std::to_string(rbp));
-            default:
-                return std::string("");
-            }
+            if (isop)
+                return std::string("Op: " + std::to_string(op.v) + " LBP" +
+                                   std::to_string(op.lbp) + ", " + " RBP" +
+                                   std::to_string(op.rbp));
+            return std::string("Num: " + std::to_string(num));
         }
     };
 
-    struct Expr {
-        char padding[3];
-        Sign op;
-        int value;
-        std::shared_ptr<Expr> lhs;
-        std::shared_ptr<Expr> rhs;
+    struct Chain {
+        char padding[1];
+        uint8_t op;
+        uint8_t lbp;
+        uint8_t rbp;
+        float num;
+        std::shared_ptr<Chain> next;
 
-        Expr(int v)
-            : padding{0}, op(Sign::NONE), value(v), lhs(nullptr), rhs(nullptr) {
-        }
+        Chain(uint8_t o, uint8_t lbp, uint8_t rbp, float n,
+              std::shared_ptr<Chain> z)
+            : op(o), lbp(lbp), rbp(rbp), num(n), next(std::move(z)) {}
 
-        Expr(Sign o)
-            : padding{0}, op(o), value(0), lhs(nullptr), rhs(nullptr) {}
-
-        Expr(Sign o, std::shared_ptr<Expr> l)
-            : padding{0}, op(o), value(0), lhs(std::move(l)), rhs(nullptr) {}
-
-        Expr(Sign o, std::shared_ptr<Expr> l, std::shared_ptr<Expr> r)
-            : padding{0}, op(o), value(0), lhs(std::move(l)),
-              rhs(std::move(r)) {}
-
-        float eval() const;
+        std::string ToStr() const;
     };
 
-    std::vector<std::pair<parser::TknType, int>> str2pairs(const char *);
+    std::vector<Atom> str2atoms(const char *);
 
-    std::vector<parser::Token>
-    pairs2tokens(const std::vector<std::pair<parser::TknType, int>> &);
+    std::vector<Token> atoms2tokens(const std::vector<Atom> &);
 
-    std::shared_ptr<Expr> parse(std::vector<Token> &, const uint8_t);
+    std::shared_ptr<Chain> tokens2chain(std::vector<Token> &,
+                                        const std::shared_ptr<Chain> &,
+                                        const bool);
 
+    std::shared_ptr<Chain> reduce(const std::shared_ptr<Chain> &);
+
+    float eval(const std::shared_ptr<Chain> &);
 } // namespace parser
