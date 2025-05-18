@@ -49,6 +49,8 @@ namespace expr {
             : op(o), lbp(lbp), rbp(rbp), num(n), next(std::move(z)) {}
 
         std::string ToStr() const;
+
+        float Step() const;
     };
 
     std::vector<char *> split_str(const char *);

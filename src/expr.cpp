@@ -1,11 +1,13 @@
 // Integer Calculator (enum-based Token with int values)
-#include <functional>
+
+#include <unordered_map>
 
 #include "expr.hpp"
 
 namespace {
 
     static constexpr float kFNan = std::numeric_limits<float>::quiet_NaN();
+    static constexpr float kFDummy = 0.0f;
 
     // binding power delta for parenthesis
     static constexpr int8_t kBpDelta = 10;
@@ -14,15 +16,18 @@ namespace {
     static constexpr uint8_t kMinSignHelper = 1;
     // start of constants
     static constexpr uint8_t kMinSignConst = 21;
-    // start of (unary) operators (left associative)
-    static constexpr uint8_t kMinSignOpL = 101;
-    // start of unary operators (right associative)
-    static constexpr uint8_t kMinSignOpR = 121;
-    // start of infix operators
-    static constexpr uint8_t kMinSignOpI = 201;
+    // start of operators (unary / binary associative)
+    static constexpr uint8_t kMinSignOp = 101;
+    static constexpr uint8_t kOpSize = 7;
 
     // Both operatoers (left, right and infix) and helpers (parentheses)
     // used by `Atom.value`
+    //
+    // NOTE:
+    // - when adding new operators, make sure to update
+    //   - `kMapOp2Fn`
+    //   - `kMapOp2Bp`
+    // - adding constants: update `kMapConst2Real`
     enum class Sign : uint8_t {
         NONE = 0,
         // helpers
@@ -31,15 +36,14 @@ namespace {
         // constants
         PI = kMinSignConst, // pi
         E,                  // e
-        // unary operators
-        FCT = kMinSignOpL, // factorial (left associative)
-        LOG = kMinSignOpR, // log (right associative)
-        // infix operators
-        ADD = kMinSignOpI, // +
-        SUB,               // -
-        MUL,               // *
-        DIV,               // /
-        EXP,               // ^
+        // operators, size = kOpSize
+        FCT = kMinSignOp, // factorial (left associative)
+        LOG,              // log (right associative)
+        ADD,              // +
+        SUB,              // -
+        MUL,              // *
+        DIV,              // /
+        EXP,              // ^
     };
 
     enum class SignType : uint8_t {
@@ -50,30 +54,17 @@ namespace {
         OPI = 4, // infix operator
     };
 
-    static const std::unordered_map<char, Sign> kMapChar2Sign{
-        {'!', Sign::FCT}, {'+', Sign::ADD}, {'-', Sign::SUB}, {'*', Sign::MUL},
-        {'/', Sign::DIV}, {'^', Sign::EXP}, {'(', Sign::PAL}, {')', Sign::PAR},
-    };
-
     // map constant signs
     static constexpr std::array<float, 2> kMapConst2Real{
         3.14159265358979323846f, // PI (kMinSignConst)
         2.71828182845904523536f, // E
     };
 
-    // map unary Operator (left associative) to function
-    static const std::array<std::function<float(const float)>, 1> kMapOpl2Fn{
-        [](const float a) { return std::tgamma(a + 1); }, // FCT (kMinSignOpL)
-    };
-
-    // map unary Operator (right associative) to function
-    static const std::array<std::function<float(const float)>, 1> kMapOpr2Fn{
-        [](const float a) { return std::log(a); }, // LOG (kMinSignOpR)
-    };
-
-    // map infix Operator to function
-    static const std::array<std::function<float(const float, const float)>, 5>
-        kMapOpi2Fn{
+    // map Operator to function
+    static const std::array<float (*)(const float, const float), kOpSize>
+        kMapOp2Fn{
+            [](float a, float) { return std::tgamma(a + 1); }, // kMinSignOpU
+            [](float a, float) { return std::log(a); },        // LOG
             [](float a, float b) { return a + b; }, // ADD (kMinSignOpI)
             [](float a, float b) { return a - b; }, // SUB
             [](float a, float b) { return a * b; }, // MUL
@@ -81,37 +72,41 @@ namespace {
             [](float a, float b) { return std::pow(a, b); }, // EXP
         };
 
-    static const std::unordered_map<Sign, std::pair<uint8_t, uint8_t>>
-        kMapOp2Bp{
-            // infix operators
-            {Sign::ADD, {1, 1}}, // +
-            {Sign::SUB, {1, 1}}, // -
-            {Sign::MUL, {2, 2}}, // *
-            {Sign::DIV, {2, 2}}, // /
-            {Sign::EXP, {4, 3}}, // left-skewed
-            {Sign::LOG, {0, 5}}, // right associative
-            {Sign::FCT, {6, 0}}, // left associative
-        };
-
-    static constexpr SignType sign2optype(const uint8_t op) {
-        if (op >= kMinSignOpI)
-            return SignType::OPI;
-        if (op >= kMinSignOpR)
-            return SignType::OPR;
-        if (op >= kMinSignOpL)
-            return SignType::OPL;
-        if (op >= kMinSignConst)
-            return SignType::CON;
-        return SignType::NONE;
-    }
+    static constexpr std::array<std::pair<uint8_t, uint8_t>, kOpSize> kMapOp2Bp{
+        std::make_pair(6, 0), // factorial (kMinSignOp)
+        std::make_pair(0, 5), // log
+        std::make_pair(1, 1), // +
+        std::make_pair(1, 1), // -
+        std::make_pair(2, 2), // *
+        std::make_pair(2, 2), // /
+        std::make_pair(4, 3), // left-skewed
+    };
 
     // Binding power for operators
-    std::pair<uint8_t, uint8_t> get_bp(Sign op) {
+    static std::pair<uint8_t, uint8_t> get_bp(uint8_t op) {
         try {
-            return kMapOp2Bp.at(op);
+            return kMapOp2Bp.at(op - kMinSignOp);
         } catch (const std::out_of_range &) {
             throw std::runtime_error("Unknown operator");
         }
+    }
+
+    static constexpr SignType sign2optype(const uint8_t op) {
+        if (op >= kMinSignOp) {
+            auto [bpl, bpr] = get_bp(op);
+
+            if (bpl == 0 && bpr == 0)
+                return SignType::NONE;
+            if (bpl == 0)
+                return SignType::OPR;
+            if (bpr == 0)
+                return SignType::OPL;
+            return SignType::OPI;
+        }
+
+        if (op >= kMinSignConst)
+            return SignType::CON;
+        return SignType::NONE;
     }
 
     float digit2int(const char *str) {
@@ -146,6 +141,11 @@ namespace {
         }
         throw std::runtime_error("Unknown function");
     }
+
+    static const std::unordered_map<char, Sign> kMapChar2Sign{
+        {'!', Sign::FCT}, {'+', Sign::ADD}, {'-', Sign::SUB}, {'*', Sign::MUL},
+        {'/', Sign::DIV}, {'^', Sign::EXP}, {'(', Sign::PAL}, {')', Sign::PAR},
+    };
 
     uint8_t char2sign(const char c) {
         try {
@@ -246,13 +246,12 @@ expr::atoms2tokens(const std::vector<expr::Atom> &pairs) {
                 throw std::runtime_error("Unmatched right parenthesis");
             --lpar;
         } else {
-            Sign op = static_cast<Sign>(pair.value);
-            auto [bpl, bpr] = get_bp(op);
+            auto [bpl, bpr] = get_bp(pair.value);
             // OPR will always have 0 left binding power
             bpl = (bpl == 0) ? 0 : bpl + lpar * kBpDelta;
             // OPL will always have 0 right binding power
             bpr = (bpr == 0) ? 0 : bpr + lpar * kBpDelta;
-            tokens.emplace_back(static_cast<int>(op), bpl, bpr);
+            tokens.emplace_back(pair.value, bpl, bpr);
         }
     }
     if (lpar > 0)
@@ -320,34 +319,42 @@ std::string expr::Chain::ToStr() const {
     return str;
 }
 
+// Evaluate the expression of the chain head
+float expr::Chain::Step() const {
+    if (next == nullptr && sign2optype(op) == SignType::OPL) {
+        return kMapOp2Fn[op - kMinSignOp](num, kFDummy);
+    }
+    if (rbp >= next->lbp && sign2optype(op) == SignType::OPR &&
+        !std::isnan(next->num)) {
+        return kMapOp2Fn[op - kMinSignOp](next->num, kFDummy);
+    }
+    if (rbp >= next->lbp && sign2optype(op) == SignType::OPI &&
+        !std::isnan(num) && !std::isnan(next->num)) {
+        return kMapOp2Fn[op - kMinSignOp](num, next->num);
+    }
+    if (lbp >= 0 && sign2optype(op) == SignType::OPL && !std::isnan(num)) {
+        return kMapOp2Fn[op - kMinSignOp](num, kFDummy);
+    }
+    throw std::runtime_error("Invalid chain: cannot step");
+}
+
 std::shared_ptr<expr::Chain>
 expr::reduce(const std::shared_ptr<expr::Chain> &zp) {
     if (zp->next == nullptr && sign2optype(zp->op) == SignType::NONE) {
-        return std::make_shared<expr::Chain>(
-            expr::Chain(0, 0, 0, zp->num, nullptr));
+        return zp;
     }
     if (zp->next == nullptr && sign2optype(zp->op) == SignType::OPL) {
-        return std::make_shared<expr::Chain>(expr::Chain(
-            0, 0, 0, kMapOpl2Fn[zp->op - kMinSignOpL](zp->num), nullptr));
+        return std::make_shared<expr::Chain>(
+            expr::Chain(0, 0, 0, zp->Step(), nullptr));
     }
     auto z_nxt = zp->next;
-    if (zp->rbp >= z_nxt->lbp && sign2optype(zp->op) == SignType::OPR &&
-        !std::isnan(z_nxt->num)) {
-        z_nxt->num = kMapOpr2Fn[zp->op - kMinSignOpR](z_nxt->num);
+    try {
+        z_nxt->num = zp->Step();
         return z_nxt;
+    } catch (const std::runtime_error &) {
+        auto z_ = expr::Chain(zp->op, zp->lbp, zp->rbp, zp->num, reduce(z_nxt));
+        return std::make_shared<expr::Chain>(z_);
     }
-    if (zp->rbp >= z_nxt->lbp && sign2optype(zp->op) == SignType::OPI &&
-        !std::isnan(zp->num) && !std::isnan(z_nxt->num)) {
-        z_nxt->num = kMapOpi2Fn[zp->op - kMinSignOpI](zp->num, z_nxt->num);
-        return z_nxt;
-    }
-    if (zp->lbp >= 0 && sign2optype(zp->op) == SignType::OPL &&
-        !std::isnan(zp->num)) {
-        z_nxt->num = kMapOpl2Fn[zp->op - kMinSignOpL](zp->num);
-        return z_nxt;
-    }
-    auto z_ = expr::Chain(zp->op, zp->lbp, zp->rbp, zp->num, reduce(z_nxt));
-    return std::make_shared<expr::Chain>(z_);
 }
 
 float expr::eval(const std::shared_ptr<Chain> &zp) {
