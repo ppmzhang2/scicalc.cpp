@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "parser.hpp"
+#include "expr.hpp"
 
 int main() {
     std::string input;
@@ -12,13 +12,13 @@ int main() {
             break;
 
         try {
-            auto pairs = parser::str2pairs(input.c_str());
-            auto tokens = parser::pairs2tokens(pairs);
-            std::reverse(tokens.begin(), tokens.end());
-            auto expr = parser::parse(tokens, 0);
-
-            float value = expr->eval();
+            std::vector<char *> chrs = expr::split_str(input.c_str());
+            std::vector<expr::Atom> atoms = expr::chrs2atoms(chrs);
+            auto tokens = expr::atoms2tokens(atoms);
+            auto zp = expr::tokens2chain(tokens, nullptr, true);
+            float value = expr::eval(zp);
             std::cout << value << std::endl;
+            expr::free_chrs(chrs);
         } catch (std::exception &ex) {
             std::cerr << "Error: " << ex.what() << std::endl;
         }

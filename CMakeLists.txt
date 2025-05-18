@@ -25,10 +25,10 @@ set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fuse-ld=lld")
 # define sources and headers
 set(SOURCES
     "${SciCalc_SOURCE_DIR}/src/main.cpp"
-    "${SciCalc_SOURCE_DIR}/src/parser.cpp"
+    "${SciCalc_SOURCE_DIR}/src/expr.cpp"
 )
 set(HEADERS
-    "${SciCalc_SOURCE_DIR}/include/parser.hpp"
+    "${SciCalc_SOURCE_DIR}/include/expr.hpp"
 )
 
 # Create the executable
@@ -52,7 +52,7 @@ configure_file(
 # -----------------------------------------------------------------------------
 enable_testing()
 add_executable(${TEST_BIN_NAME}
-    "${SciCalc_SOURCE_DIR}/src/parser.cpp"
+    "${SciCalc_SOURCE_DIR}/src/expr.cpp"
     "${SciCalc_SOURCE_DIR}/tests/test_main.cpp"
 )
 add_test(NAME ${TEST_BIN_NAME} COMMAND ${TEST_BIN_NAME})
