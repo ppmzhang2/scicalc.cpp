@@ -367,3 +367,12 @@ float expr::eval(const std::shared_ptr<Chain> &zp) {
     }
     return z->num;
 }
+
+float expr::eval(const char *str) {
+    auto chrs = split_str(str);
+    auto atoms = chrs2atoms(chrs);
+    free_chrs(chrs);
+    auto tokens = atoms2tokens(atoms);
+    auto chain = tokens2chain(tokens, nullptr, true);
+    return eval(chain);
+}

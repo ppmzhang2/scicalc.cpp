@@ -68,4 +68,6 @@ namespace expr {
     std::shared_ptr<Chain> reduce(const std::shared_ptr<Chain> &);
 
     float eval(const std::shared_ptr<Chain> &);
+
+    float eval(const char *str);
 } // namespace expr
