@@ -280,17 +280,23 @@ expr::atoms2tokens(const std::vector<expr::Atom> &pairs) {
     return tokens;
 }
 
+// NOTE:
+//   the implementation should NOT create ambiguous chain nodes i.e. nodes with
+//   both valid num and op values
+//   - a num node should always has `op = Sign::NONE`
+//   - an op node should always has `num = kFNan`
+//   This ensures that the chain functions can use function `sign2optype`
+//   freely without checking first either it is an operator or a number
 std::shared_ptr<expr::Chain>
 expr::tokens2chain(std::vector<expr::Token> &tokens,
-                   const std::shared_ptr<expr::Chain> &zipper,
-                   const bool done) {
+                   const std::shared_ptr<expr::Chain> &head, const bool done) {
     if (tokens.empty() && !done)
         // Error 1: e.g. starting with a infix / left associative operator
         throw std::runtime_error("Incomplete expression");
     if (tokens.empty())
-        return zipper;
+        return head;
     // NOTE: must check `tokens.back()` is an operator
-    if (zipper == nullptr && tokens.back().isop &&
+    if (head == nullptr && tokens.back().isop &&
         (sign2optype(tokens.back().op.v) == SignType::OPI ||
          sign2optype(tokens.back().op.v) == SignType::OPR)) {
         // Error 2: e.g. ending with a infix / right associative operator
@@ -300,35 +306,35 @@ expr::tokens2chain(std::vector<expr::Token> &tokens,
     auto tkn = tokens.back();
     tokens.pop_back();
 
-    // 1. For left associative operators, always create a new zipper,
+    // 1. For left associative operators, always create a new chain node,
     // regardless of the `done` flag
     if (tkn.isop && sign2optype(tkn.op.v) == SignType::OPL) {
-        const auto z =
-            expr::Chain(tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, zipper);
-        return tokens2chain(tokens, std::make_shared<expr::Chain>(z), false);
+        const auto c =
+            expr::Chain(tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, head);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c), false);
     }
 
     // either OPR or OPI
     if (done && tkn.isop) {
-        const auto z =
-            expr::Chain(tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, zipper);
-        // 2. if tkn.op is right associative, this zipper is done
+        const auto c =
+            expr::Chain(tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, head);
+        // 2. if tkn.op is right associative, this node is done
         // 3. if tkn.op is infix, fill the lhs in the next round
         bool done_ = (sign2optype(tkn.op.v) == SignType::OPR) ? true : false;
-        return tokens2chain(tokens, std::make_shared<expr::Chain>(z), done_);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c), done_);
     }
 
     // 4. add the last token (num) or the lhs of an infix operator
     if (done && !tkn.isop) {
-        const auto z = expr::Chain(static_cast<uint8_t>(Sign::NONE), 0, 0,
-                                   tkn.num, zipper);
-        return tokens2chain(tokens, std::make_shared<expr::Chain>(z), true);
+        const auto c =
+            expr::Chain(static_cast<uint8_t>(Sign::NONE), 0, 0, tkn.num, head);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c), true);
     }
 
     // 5. add the lhs of an infix / left associative operator
     if (!done && !tkn.isop) {
-        zipper->num = tkn.num;
-        return tokens2chain(tokens, zipper, true);
+        head->num = tkn.num;
+        return tokens2chain(tokens, head, true);
     }
 
     // Other error cases
@@ -353,6 +359,9 @@ std::string expr::Chain::ToStr() const {
 }
 
 // Evaluate the expression of the chain head
+// TODO:
+// - handle the only-num case?
+// - is this function necessary?
 float expr::Chain::Step() const {
     if (next == nullptr && sign2optype(op) == SignType::OPL) {
         return kMapOp2Fn[op - kMinSignOp](num, kFDummy);
@@ -372,33 +381,34 @@ float expr::Chain::Step() const {
 }
 
 std::shared_ptr<expr::Chain>
-expr::reduce(const std::shared_ptr<expr::Chain> &zp) {
-    if (zp->next == nullptr && sign2optype(zp->op) == SignType::NONE) {
-        return zp;
+expr::reduce(const std::shared_ptr<expr::Chain> &car) {
+    if (car->next == nullptr && sign2optype(car->op) == SignType::NONE) {
+        return car;
     }
-    if (zp->next == nullptr && sign2optype(zp->op) == SignType::OPL) {
+    if (car->next == nullptr && sign2optype(car->op) == SignType::OPL) {
         return std::make_shared<expr::Chain>(
-            expr::Chain(0, 0, 0, zp->Step(), nullptr));
+            expr::Chain(0, 0, 0, car->Step(), nullptr));
     }
-    auto z_nxt = zp->next;
+    auto cdr = car->next;
     try {
-        z_nxt->num = zp->Step();
-        return z_nxt;
+        cdr->num = car->Step();
+        return cdr;
     } catch (const std::runtime_error &) {
-        auto z_ = expr::Chain(zp->op, zp->lbp, zp->rbp, zp->num, reduce(z_nxt));
-        return std::make_shared<expr::Chain>(z_);
+        auto c =
+            expr::Chain(car->op, car->lbp, car->rbp, car->num, reduce(cdr));
+        return std::make_shared<expr::Chain>(c);
     }
 }
 
-float expr::eval(const std::shared_ptr<Chain> &zp) {
-    auto z = zp;
+float expr::eval(const std::shared_ptr<Chain> &chain) {
+    auto c = chain;
     while (true) {
-        if (z->next == nullptr && sign2optype(z->op) == SignType::NONE) {
+        if (c->next == nullptr && sign2optype(c->op) == SignType::NONE) {
             break;
         }
-        z = reduce(z);
+        c = reduce(c);
     }
-    return z->num;
+    return c->num;
 }
 
 float expr::eval(const char *str) {

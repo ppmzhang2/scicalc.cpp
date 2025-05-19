@@ -9,6 +9,7 @@ TEST(EXPR, ParseRaw) {
 
     char str5[] = "ln4!";
     char str6[] = "3! - ln(5-1) + 7 / 3^2";
+    char str7[] = "pi";
 
     float ep = 1e-3;
     float ans1 = -51;
@@ -17,6 +18,7 @@ TEST(EXPR, ParseRaw) {
     float ans4 = 15;
     float ans5 = 3.17805;
     float ans6 = 5.39148;
+    float ans7 = 3.14159;
 
     EXPECT_EQ(ans1, expr::eval(str1));
     EXPECT_EQ(ans2, expr::eval(str2));
@@ -24,4 +26,5 @@ TEST(EXPR, ParseRaw) {
     EXPECT_EQ(ans4, expr::eval(str4));
     EXPECT_NEAR(ans5, expr::eval(str5), ep);
     EXPECT_NEAR(ans6, expr::eval(str6), ep);
+    EXPECT_NEAR(ans7, expr::eval(str7), ep);
 }
