@@ -164,6 +164,51 @@ namespace {
             throw std::runtime_error("Unknown operator");
         }
     }
+
+    enum class ChainState : uint8_t {
+        NONE = 0, // should correspond to nullptr
+
+        // last node should be evaluated as merely an operand and thus
+        // can only have the following two valid states
+
+        LAST_NUM,     // null next, only num (DONE)
+        LAST_OPL,     // null next, opl only
+        LAST_OPL_NUM, // null next, num + opl (DONE)
+
+        REST_OPL,     // non-null next, opl only
+        REST_OPR,     // non-null next, opr only (DONE)
+        REST_OPI,     // non-null next, opi only
+        REST_OPL_NUM, // non-null next, opl + num (DONE)
+        REST_OPI_NUM, // non-null next, opi + num (DONE)
+    };
+
+    ChainState chain_state(const std::shared_ptr<expr::Chain> &head) {
+        if (head == nullptr)
+            return ChainState::NONE;
+        return static_cast<ChainState>(head->state);
+    }
+
+    static constexpr std::array<bool, 9> kChainStateDone{
+        true,  // NONE
+        true,  // LAST_NUM
+        false, // LAST_OPL
+        true,  // LAST_OPL_NUM
+        false, // REST_OPL
+        true,  // REST_OPR
+        false, // REST_OPI
+        true,  // REST_OPL_NUM
+        true,  // REST_OPI_NUM
+    };
+
+    bool chain_done(const std::shared_ptr<expr::Chain> &head) {
+        if (head == nullptr)
+            return true;
+        try {
+            return kChainStateDone.at(head->state);
+        } catch (const std::out_of_range &) {
+            throw std::runtime_error("Unknown chain state");
+        }
+    }
 } // namespace
 
 // Split a string into substrings, each containing a single token, either a
@@ -289,52 +334,105 @@ expr::atoms2tokens(const std::vector<expr::Atom> &pairs) {
 //   freely without checking first either it is an operator or a number
 std::shared_ptr<expr::Chain>
 expr::tokens2chain(std::vector<expr::Token> &tokens,
-                   const std::shared_ptr<expr::Chain> &head, const bool done) {
-    if (tokens.empty() && !done)
+                   const std::shared_ptr<expr::Chain> &head) {
+    if (tokens.empty() && !chain_done(head))
         // Error 1: e.g. starting with a infix / left associative operator
         throw std::runtime_error("Incomplete expression");
     if (tokens.empty())
         return head;
-    // NOTE: must check `tokens.back()` is an operator
-    if (head == nullptr && tokens.back().isop &&
-        (sign2optype(tokens.back().op.v) == SignType::OPI ||
-         sign2optype(tokens.back().op.v) == SignType::OPR)) {
-        // Error 2: e.g. ending with a infix / right associative operator
-        throw std::runtime_error("Unfinished expression");
-    }
 
     auto tkn = tokens.back();
     tokens.pop_back();
 
-    // 1. For left associative operators, always create a new chain node,
-    // regardless of the `done` flag
-    if (tkn.isop && sign2optype(tkn.op.v) == SignType::OPL) {
+    // CASE: ChainState::NONE, opl
+    if (chain_state(head) == ChainState::NONE && tkn.isop &&
+        sign2optype(tkn.op.v) == SignType::OPL) {
         const auto c =
-            expr::Chain(tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, head);
-        return tokens2chain(tokens, std::make_shared<expr::Chain>(c), false);
+            expr::Chain(static_cast<uint8_t>(ChainState::LAST_OPL), tkn.op.v,
+                        tkn.op.lbp, tkn.op.rbp, kFNan, nullptr);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
     }
 
-    // either OPR or OPI
-    if (done && tkn.isop) {
-        const auto c =
-            expr::Chain(tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, head);
-        // 2. if tkn.op is right associative, this node is done
-        // 3. if tkn.op is infix, fill the lhs in the next round
-        bool done_ = (sign2optype(tkn.op.v) == SignType::OPR) ? true : false;
-        return tokens2chain(tokens, std::make_shared<expr::Chain>(c), done_);
+    // CASE: ChainState::NONE, num
+    if (chain_state(head) == ChainState::NONE && !tkn.isop) {
+        const auto c = expr::Chain(static_cast<uint8_t>(ChainState::LAST_NUM),
+                                   0, 0, 0, tkn.num, nullptr);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
     }
 
-    // 4. add the last token (num) or the lhs of an infix operator
-    if (done && !tkn.isop) {
-        const auto c =
-            expr::Chain(static_cast<uint8_t>(Sign::NONE), 0, 0, tkn.num, head);
-        return tokens2chain(tokens, std::make_shared<expr::Chain>(c), true);
+    // CASE: ERROR unfinished expression
+    if (chain_state(head) == ChainState::NONE) {
+        throw std::runtime_error("Unfinished expression");
     }
 
-    // 5. add the lhs of an infix / left associative operator
-    if (!done && !tkn.isop) {
+    // CASE: ChainState::LAST_OPL, num
+    if (chain_state(head) == ChainState::LAST_OPL && !tkn.isop) {
         head->num = tkn.num;
-        return tokens2chain(tokens, head, true);
+        head->state = static_cast<uint8_t>(ChainState::LAST_OPL_NUM);
+        return tokens2chain(tokens, head);
+    }
+
+    // CASE: ChainState::LAST_OPL, opl
+    if (chain_state(head) == ChainState::LAST_OPL && tkn.isop &&
+        sign2optype(tkn.op.v) == SignType::OPL) {
+        auto c = expr::Chain(static_cast<uint8_t>(ChainState::REST_OPL),
+                             tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, head);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
+    }
+
+    // CASE: ERROR missing operand for OP:
+    if (chain_state(head) == ChainState::LAST_OPL) {
+        throw std::runtime_error("Missing operand for OPL");
+    }
+
+    // CASE: DONE, opr
+    // if tkn.op is right associative, this node is done
+    if (chain_done(head) && tkn.isop &&
+        sign2optype(tkn.op.v) == SignType::OPR) {
+        const auto c =
+            expr::Chain(static_cast<uint8_t>(ChainState::REST_OPR), tkn.op.v,
+                        tkn.op.lbp, tkn.op.rbp, kFNan, head);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
+    }
+
+    // CASE: DONE, opi
+    // if tkn.op is infix, fill the lhs in the next round
+    if (chain_done(head) && tkn.isop &&
+        sign2optype(tkn.op.v) == SignType::OPI) {
+        const auto c =
+            expr::Chain(static_cast<uint8_t>(ChainState::REST_OPI), tkn.op.v,
+                        tkn.op.lbp, tkn.op.rbp, kFNan, head);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
+    }
+
+    // CASE: DONE, ERROR otherwise
+    if (chain_done(head)) {
+        throw std::runtime_error("Dangling NUM / OPL");
+    }
+
+    // CASE: UNDONE, opl
+    if (!chain_done(head) && tkn.isop &&
+        sign2optype(tkn.op.v) == SignType::OPL) {
+        const auto c =
+            expr::Chain(static_cast<uint8_t>(ChainState::REST_OPL), tkn.op.v,
+                        tkn.op.lbp, tkn.op.rbp, kFNan, head);
+        return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
+    }
+
+    // CASE: ChainState::REST_OPL, num
+    if (static_cast<ChainState>(head->state) == ChainState::REST_OPL &&
+        !tkn.isop) {
+        head->num = tkn.num;
+        head->state = static_cast<uint8_t>(ChainState::REST_OPL_NUM);
+        return tokens2chain(tokens, head);
+    }
+
+    // CASE: ChainState::REST_OPI, num
+    if (static_cast<ChainState>(head->state) == ChainState::REST_OPI &&
+        !tkn.isop) {
+        head->num = tkn.num;
+        head->state = static_cast<uint8_t>(ChainState::REST_OPI_NUM);
+        return tokens2chain(tokens, head);
     }
 
     // Other error cases
@@ -387,15 +485,16 @@ expr::reduce(const std::shared_ptr<expr::Chain> &car) {
     }
     if (car->next == nullptr && sign2optype(car->op) == SignType::OPL) {
         return std::make_shared<expr::Chain>(
-            expr::Chain(0, 0, 0, car->Step(), nullptr));
+            expr::Chain(static_cast<uint8_t>(ChainState::LAST_NUM), 0, 0, 0,
+                        car->Step(), nullptr));
     }
     auto cdr = car->next;
     try {
         cdr->num = car->Step();
         return cdr;
     } catch (const std::runtime_error &) {
-        auto c =
-            expr::Chain(car->op, car->lbp, car->rbp, car->num, reduce(cdr));
+        auto c = expr::Chain(car->state, car->op, car->lbp, car->rbp, car->num,
+                             reduce(cdr));
         return std::make_shared<expr::Chain>(c);
     }
 }
@@ -416,6 +515,6 @@ float expr::eval(const char *str) {
     auto atoms = chrs2atoms(chrs);
     free_chrs(chrs);
     auto tokens = atoms2tokens(atoms);
-    auto chain = tokens2chain(tokens, nullptr, true);
+    auto chain = tokens2chain(tokens, nullptr);
     return eval(chain);
 }

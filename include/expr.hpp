@@ -38,16 +38,16 @@ namespace expr {
     };
 
     struct Chain {
-        char padding[1];
-        uint8_t op;  // IMP: enum class Sign
+        uint8_t state; // IMP: enum class ChainState
+        uint8_t op;    // IMP: enum class Sign
         uint8_t lbp;
         uint8_t rbp;
         float num;
         std::shared_ptr<Chain> next;
 
-        Chain(uint8_t o, uint8_t lbp, uint8_t rbp, float n,
+        Chain(uint8_t s, uint8_t o, uint8_t lbp, uint8_t rbp, float n,
               std::shared_ptr<Chain> z)
-            : op(o), lbp(lbp), rbp(rbp), num(n), next(std::move(z)) {}
+            : state(s), op(o), lbp(lbp), rbp(rbp), num(n), next(std::move(z)) {}
 
         std::string ToStr() const;
 
@@ -63,8 +63,7 @@ namespace expr {
     std::vector<Token> atoms2tokens(const std::vector<Atom> &);
 
     std::shared_ptr<Chain> tokens2chain(std::vector<Token> &,
-                                        const std::shared_ptr<Chain> &,
-                                        const bool);
+                                        const std::shared_ptr<Chain> &);
 
     std::shared_ptr<Chain> reduce(const std::shared_ptr<Chain> &);
 
