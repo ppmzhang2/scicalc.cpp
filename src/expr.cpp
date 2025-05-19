@@ -289,7 +289,8 @@ expr::tokens2chain(std::vector<expr::Token> &tokens,
         throw std::runtime_error("Incomplete expression");
     if (tokens.empty())
         return zipper;
-    if (zipper == nullptr &&
+    // NOTE: must check `tokens.back()` is an operator
+    if (zipper == nullptr && tokens.back().isop &&
         (sign2optype(tokens.back().op.v) == SignType::OPI ||
          sign2optype(tokens.back().op.v) == SignType::OPR)) {
         // Error 2: e.g. ending with a infix / right associative operator
