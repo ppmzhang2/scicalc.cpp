@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 namespace expr {
@@ -19,7 +20,7 @@ namespace expr {
 
         bool isop;
         union {
-            float num; // either a number or a sign
+            float num; // number
             Op op;     // operator
         };
 
@@ -38,7 +39,7 @@ namespace expr {
 
     struct Chain {
         char padding[1];
-        uint8_t op;
+        uint8_t op;  // IMP: enum class Sign
         uint8_t lbp;
         uint8_t rbp;
         float num;
@@ -68,4 +69,6 @@ namespace expr {
     std::shared_ptr<Chain> reduce(const std::shared_ptr<Chain> &);
 
     float eval(const std::shared_ptr<Chain> &);
+
+    float eval(const char *str);
 } // namespace expr

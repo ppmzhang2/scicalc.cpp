@@ -1,5 +1,8 @@
 // Integer Calculator (enum-based Token with int values)
-
+#include <array>
+#include <cmath>
+#include <cstring>
+#include <limits>
 #include <unordered_map>
 
 #include "expr.hpp"
@@ -18,13 +21,14 @@ namespace {
     static constexpr uint8_t kMinSignConst = 21;
     // start of operators (unary / binary associative)
     static constexpr uint8_t kMinSignOp = 101;
-    static constexpr uint8_t kOpSize = 7;
+    static constexpr uint8_t kOpSize = 9;
 
     // Both operatoers (left, right and infix) and helpers (parentheses)
     // used by `Atom.value`
     //
     // NOTE:
     // - when adding new operators, make sure to update
+    //   - `kOpSize`
     //   - `kMapOp2Fn`
     //   - `kMapOp2Bp`
     // - adding constants: update `kMapConst2Real`
@@ -44,6 +48,8 @@ namespace {
         MUL,              // *
         DIV,              // /
         EXP,              // ^
+        UAD,              // unary add (right associative)
+        USB,              // unary sub (right associative)
     };
 
     enum class SignType : uint8_t {
@@ -70,6 +76,8 @@ namespace {
             [](float a, float b) { return a * b; }, // MUL
             [](float a, float b) { return a / b; }, // DIV
             [](float a, float b) { return std::pow(a, b); }, // EXP
+            [](float a, float) { return a; },                // UAD
+            [](float a, float) { return -a; },               // USB
         };
 
     static constexpr std::array<std::pair<uint8_t, uint8_t>, kOpSize> kMapOp2Bp{
@@ -80,6 +88,8 @@ namespace {
         std::make_pair(2, 2), // *
         std::make_pair(2, 2), // /
         std::make_pair(4, 3), // left-skewed
+        std::make_pair(0, 1), // unary add
+        std::make_pair(0, 1), // unary sub
     };
 
     // Binding power for operators
@@ -207,6 +217,9 @@ void expr::free_chrs(std::vector<char *> &chrs) {
 }
 
 std::vector<expr::Atom> expr::chrs2atoms(const std::vector<char *> &chrs) {
+    if (chrs.empty())
+        throw std::runtime_error("Empty string");
+
     std::vector<expr::Atom> atoms;
 
     for (const auto &token : chrs) {
@@ -220,6 +233,14 @@ std::vector<expr::Atom> expr::chrs2atoms(const std::vector<char *> &chrs) {
             uint8_t val = char2sign(*token);
             atoms.emplace_back(true, static_cast<float>(val));
         }
+    }
+
+    // Change the starting + or - sign to unary
+    if (atoms[0].sign && atoms[0].value == static_cast<float>(Sign::SUB)) {
+        atoms[0].value = static_cast<float>(Sign::USB);
+    } else if (atoms[0].sign &&
+               atoms[0].value == static_cast<float>(Sign::ADD)) {
+        atoms[0].value = static_cast<float>(Sign::UAD);
     }
 
     return atoms;
@@ -263,8 +284,18 @@ std::shared_ptr<expr::Chain>
 expr::tokens2chain(std::vector<expr::Token> &tokens,
                    const std::shared_ptr<expr::Chain> &zipper,
                    const bool done) {
+    if (tokens.empty() && !done)
+        // Error 1: e.g. starting with a infix / left associative operator
+        throw std::runtime_error("Incomplete expression");
     if (tokens.empty())
         return zipper;
+    if (zipper == nullptr &&
+        (sign2optype(tokens.back().op.v) == SignType::OPI ||
+         sign2optype(tokens.back().op.v) == SignType::OPR)) {
+        // Error 2: e.g. ending with a infix / right associative operator
+        throw std::runtime_error("Unfinished expression");
+    }
+
     auto tkn = tokens.back();
     tokens.pop_back();
 
@@ -286,7 +317,7 @@ expr::tokens2chain(std::vector<expr::Token> &tokens,
         return tokens2chain(tokens, std::make_shared<expr::Chain>(z), done_);
     }
 
-    // 4. initial call i.e. add the last token (num)
+    // 4. add the last token (num) or the lhs of an infix operator
     if (done && !tkn.isop) {
         const auto z = expr::Chain(static_cast<uint8_t>(Sign::NONE), 0, 0,
                                    tkn.num, zipper);
@@ -299,6 +330,7 @@ expr::tokens2chain(std::vector<expr::Token> &tokens,
         return tokens2chain(tokens, zipper, true);
     }
 
+    // Other error cases
     throw std::runtime_error("Invalid token");
 }
 
@@ -366,4 +398,13 @@ float expr::eval(const std::shared_ptr<Chain> &zp) {
         z = reduce(z);
     }
     return z->num;
+}
+
+float expr::eval(const char *str) {
+    auto chrs = split_str(str);
+    auto atoms = chrs2atoms(chrs);
+    free_chrs(chrs);
+    auto tokens = atoms2tokens(atoms);
+    auto chain = tokens2chain(tokens, nullptr, true);
+    return eval(chain);
 }

@@ -1,0 +1,90 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'include/**'
+      - 'src/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget gnupg
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 19
+        sudo apt-get install -y cmake build-essential clang-19 lld-19
+
+    - name: Setup Contribs
+      run: |
+        git submodule update --init --recursive
+
+    - name: Run build script
+      run: |
+        ./build.sh release
+      env:
+        CC: /usr/bin/clang-19
+        CXX: /usr/bin/clang++-19
+        LD: /usr/bin/ld.lld-19
+
+    - name: Extract branch or tag name
+      id: extract_ref
+      run: |
+        REF_NAME=$(echo ${{ github.ref }} | sed 's|.*/||') # Remove refs/heads/ or refs/tags/ prefix
+        if [ "$REF_NAME" == "master" ]; then
+          # If it's a push to the master branch, generate a unique tag name based on the date
+          REF_NAME="release-$(date +'%Y%m%d')"
+        fi
+        echo "branch_or_tag=$REF_NAME" >> $GITHUB_OUTPUT
+
+    - name: Authenticate with GitHub CLI
+      run: |
+        echo ${{ secrets.PERSONAL_TOKEN }} | gh auth login --with-token
+
+    - name: Check for existing release
+      id: check_release
+      run: |
+        RELEASE_URL=$(gh release view ${{ steps.extract_ref.outputs.branch_or_tag }} --json url -q ".url" || echo "")
+        echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
+
+    - name: Delete existing release if it exists
+      if: steps.check_release.outputs.release_url != ''
+      run: |
+        gh release delete ${{ steps.extract_ref.outputs.branch_or_tag }} --yes
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+      with:
+        tag_name: ${{ steps.extract_ref.outputs.branch_or_tag }}
+        release_name: Release ${{ steps.extract_ref.outputs.branch_or_tag }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.PERSONAL_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build/bin/scicalc
+        asset_name: scicalc
+        asset_content_type: application/octet-stream
