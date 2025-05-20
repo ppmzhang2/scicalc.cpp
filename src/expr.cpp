@@ -166,29 +166,30 @@ namespace {
     }
 
     enum class ChainState : uint8_t {
-        NUL = 0, // should correspond to nullptr
+        NUL_NUL_NUL = 0, // represent nullptr (NOMOD, expect num / OPL)
 
-        // last node should be evaluated as merely an operand and thus
-        // can only have the following two valid states
+        // All `XXX_XXX_NUL` are last node in the chain, which should be
+        // evaluated as merely an operand and thus can only have the following
+        // three valid states
 
-        LHS_NUL_NUL, // null next, only num (DONE)
-        NUL_OPL_NUL, // null next, opl only
-        LHS_OPL_NUL, // null next, num + opl (DONE)
+        LHS_NUL_NUL, // null RHS, only num (NOMOD | expect OPR / OPI)
+        NUL_OPL_NUL, // null RHS, opl only (MOD | expect num / OPL)
+        LHS_OPL_NUL, // null RHS, num + opl (NOMOD, expect OPR / OPI)
 
-        NUL_OPL_RHS, // non-null next, opl only
-        NUL_OPR_RHS, // non-null next, opr only (DONE)
-        NUL_OPI_RHS, // non-null next, opi only
-        LHS_OPL_RHS, // non-null next, opl + num (DONE)
-        LHS_OPI_RHS, // non-null next, opi + num (DONE)
+        NUL_OPL_RHS, // not-null RHS, opl only (MOD | expect num / OPL)
+        NUL_OPR_RHS, // not-null RHS, opr only (NOMOD, expect OPR / OPI)
+        NUL_OPI_RHS, // not-null RHS, opi only (MOD | expect num / OPL)
+        LHS_OPL_RHS, // not-null RHS, opl + num (NOMOD, expect OPR / OPI)
+        LHS_OPI_RHS, // not-null RHS, opi + num (NOMOD, expect OPR / OPI)
     };
 
     ChainState chain_state(const std::shared_ptr<expr::Chain> &head) {
         if (head == nullptr)
-            return ChainState::NUL;
+            return ChainState::NUL_NUL_NUL;
         return static_cast<ChainState>(head->state);
     }
 
-    static constexpr std::array<bool, 9> kChainStateDone{
+    static constexpr std::array<bool, 9> kMapChain2NoMod{
         true,  // NUL
         true,  // LHS_NUL_NUL
         false, // NUL_OPL_NUL
@@ -200,11 +201,13 @@ namespace {
         true,  // LHS_OPI_RHS
     };
 
-    bool chain_done(const std::shared_ptr<expr::Chain> &head) {
+    // true if a new node is needed (NOMOD), otherwise current node can be
+    // modified (MOD)
+    bool chain_nomod(const std::shared_ptr<expr::Chain> &head) {
         if (head == nullptr)
             return true;
         try {
-            return kChainStateDone.at(head->state);
+            return kMapChain2NoMod.at(head->state);
         } catch (const std::out_of_range &) {
             throw std::runtime_error("Unknown chain state");
         }
@@ -335,7 +338,7 @@ expr::atoms2tokens(const std::vector<expr::Atom> &pairs) {
 std::shared_ptr<expr::Chain>
 expr::tokens2chain(std::vector<expr::Token> &tokens,
                    const std::shared_ptr<expr::Chain> &head) {
-    if (tokens.empty() && !chain_done(head))
+    if (tokens.empty() && !chain_nomod(head))
         // Error 1: e.g. starting with a infix / left associative operator
         throw std::runtime_error("Incomplete expression");
     if (tokens.empty())
@@ -344,99 +347,74 @@ expr::tokens2chain(std::vector<expr::Token> &tokens,
     auto tkn = tokens.back();
     tokens.pop_back();
 
-    // CASE: ChainState::NUL, opl
-    if (chain_state(head) == ChainState::NUL && tkn.isop &&
+    // CASE 1: enumerate NUL_NUL_NUL, different from the other NOMOD cases
+    if (chain_state(head) == ChainState::NUL_NUL_NUL && tkn.isop &&
         sign2optype(tkn.op.v) == SignType::OPL) {
         const auto c =
             expr::Chain(static_cast<uint8_t>(ChainState::NUL_OPL_NUL), tkn.op.v,
                         tkn.op.lbp, tkn.op.rbp, kFNan, nullptr);
         return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
     }
-
-    // CASE: ChainState::NUL, num
-    if (chain_state(head) == ChainState::NUL && !tkn.isop) {
+    if (chain_state(head) == ChainState::NUL_NUL_NUL && !tkn.isop) {
         const auto c =
             expr::Chain(static_cast<uint8_t>(ChainState::LHS_NUL_NUL), 0, 0, 0,
                         tkn.num, nullptr);
         return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
     }
-
-    // CASE: ChainState::NUL, ERROR unfinished expression
-    if (chain_state(head) == ChainState::NUL) {
+    if (chain_state(head) == ChainState::NUL_NUL_NUL) {
         throw std::runtime_error("Unfinished expression");
     }
 
-    // CASE: ChainState::NUL_OPL_NUL (UNDONE), num
-    if (chain_state(head) == ChainState::NUL_OPL_NUL && !tkn.isop) {
-        head->num = tkn.num;
-        head->state = static_cast<uint8_t>(ChainState::LHS_OPL_NUL);
-        return tokens2chain(tokens, head);
-    }
-
-    // CASE: ChainState::NUL_OPL_NUL (UNDONE), opl
-    if (chain_state(head) == ChainState::NUL_OPL_NUL && tkn.isop &&
-        sign2optype(tkn.op.v) == SignType::OPL) {
-        auto c = expr::Chain(static_cast<uint8_t>(ChainState::NUL_OPL_RHS),
-                             tkn.op.v, tkn.op.lbp, tkn.op.rbp, kFNan, head);
-        return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
-    }
-
-    // CASE: NUL_OPL_NUL (UNDONE), ERROR missing operand for OP
-    if (chain_state(head) == ChainState::NUL_OPL_NUL) {
-        throw std::runtime_error("Missing operand for OPL");
-    }
-
-    // CASE: DONE, opr
-    // if tkn.op is right associative, this node is done
-    if (chain_done(head) && tkn.isop &&
+    // CASE 2: enumerate NOMOD
+    if (chain_nomod(head) && tkn.isop &&
         sign2optype(tkn.op.v) == SignType::OPR) {
         const auto c =
             expr::Chain(static_cast<uint8_t>(ChainState::NUL_OPR_RHS), tkn.op.v,
                         tkn.op.lbp, tkn.op.rbp, kFNan, head);
         return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
     }
-
-    // CASE: DONE, opi
-    // if tkn.op is infix, fill the lhs in the next round
-    if (chain_done(head) && tkn.isop &&
+    if (chain_nomod(head) && tkn.isop &&
         sign2optype(tkn.op.v) == SignType::OPI) {
         const auto c =
             expr::Chain(static_cast<uint8_t>(ChainState::NUL_OPI_RHS), tkn.op.v,
                         tkn.op.lbp, tkn.op.rbp, kFNan, head);
         return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
     }
-
-    // CASE: DONE, ERROR otherwise
-    if (chain_done(head)) {
+    if (chain_nomod(head)) {
         throw std::runtime_error("Dangling NUM / OPL");
     }
 
-    // CASE: all UNDONE can prepend opl
-    if (!chain_done(head) && tkn.isop &&
+    // CASE 3: enumerate MOD
+    if (!chain_nomod(head) && tkn.isop &&
+        // all MOD can prepend opl
         sign2optype(tkn.op.v) == SignType::OPL) {
         const auto c =
             expr::Chain(static_cast<uint8_t>(ChainState::NUL_OPL_RHS), tkn.op.v,
                         tkn.op.lbp, tkn.op.rbp, kFNan, head);
         return tokens2chain(tokens, std::make_shared<expr::Chain>(c));
     }
-
-    // CASE: ChainState::REST_OPL, num (UNDONE, modify lhs)
-    if (static_cast<ChainState>(head->state) == ChainState::NUL_OPL_RHS &&
-        !tkn.isop) {
-        head->num = tkn.num;
+    if (chain_state(head) == ChainState::NUL_OPL_NUL && !tkn.isop) {
+        // modify LHS
+        head->lhs = tkn.num;
+        head->state = static_cast<uint8_t>(ChainState::LHS_OPL_NUL);
+        return tokens2chain(tokens, head);
+    }
+    if (chain_state(head) == ChainState::NUL_OPL_RHS && !tkn.isop) {
+        // modify LHS
+        head->lhs = tkn.num;
         head->state = static_cast<uint8_t>(ChainState::LHS_OPL_RHS);
         return tokens2chain(tokens, head);
     }
-
-    // CASE: ChainState::REST_OPI, num (UNDONE, modify lhs)
-    if (static_cast<ChainState>(head->state) == ChainState::NUL_OPI_RHS &&
-        !tkn.isop) {
-        head->num = tkn.num;
+    if (chain_state(head) == ChainState::NUL_OPI_RHS && !tkn.isop) {
+        // modify LHS
+        head->lhs = tkn.num;
         head->state = static_cast<uint8_t>(ChainState::LHS_OPI_RHS);
         return tokens2chain(tokens, head);
     }
+    if (!chain_nomod(head))
+        throw std::runtime_error("Dangling OPR / OPI");
 
-    // Other error cases
+    // CASE 4: catch all other invalid cases (if there is any)
     throw std::runtime_error("Invalid token");
 }
 
@@ -444,12 +422,12 @@ std::string expr::Chain::ToStr() const {
     std::string str;
     str += "Chain(";
     if (op == static_cast<uint8_t>(Sign::NONE)) {
-        str += "num=" + std::to_string(num) + ")";
+        str += "num=" + std::to_string(lhs) + ")";
     } else {
-        str += "op=" + std::to_string(op) + ", num=" + std::to_string(num) +
+        str += "op=" + std::to_string(op) + ", num=" + std::to_string(lhs) +
                ", LBP=" + std::to_string(lbp) + ", RBP=" + std::to_string(rbp);
-        if (next) {
-            str += ", next=" + next->ToStr();
+        if (rhs) {
+            str += ", next=" + rhs->ToStr();
         } else {
             str += ", next=null";
         }
@@ -462,39 +440,39 @@ std::string expr::Chain::ToStr() const {
 // - handle the only-num case?
 // - is this function necessary?
 float expr::Chain::Step() const {
-    if (next == nullptr && sign2optype(op) == SignType::OPL) {
-        return kMapOp2Fn[op - kMinSignOp](num, kFDummy);
+    if (rhs == nullptr && sign2optype(op) == SignType::OPL) {
+        return kMapOp2Fn[op - kMinSignOp](lhs, kFDummy);
     }
-    if (rbp >= next->lbp && sign2optype(op) == SignType::OPR &&
-        !std::isnan(next->num)) {
-        return kMapOp2Fn[op - kMinSignOp](next->num, kFDummy);
+    if (rbp >= rhs->lbp && sign2optype(op) == SignType::OPR &&
+        !std::isnan(rhs->lhs)) {
+        return kMapOp2Fn[op - kMinSignOp](rhs->lhs, kFDummy);
     }
-    if (rbp >= next->lbp && sign2optype(op) == SignType::OPI &&
-        !std::isnan(num) && !std::isnan(next->num)) {
-        return kMapOp2Fn[op - kMinSignOp](num, next->num);
+    if (rbp >= rhs->lbp && sign2optype(op) == SignType::OPI &&
+        !std::isnan(lhs) && !std::isnan(rhs->lhs)) {
+        return kMapOp2Fn[op - kMinSignOp](lhs, rhs->lhs);
     }
-    if (lbp >= 0 && sign2optype(op) == SignType::OPL && !std::isnan(num)) {
-        return kMapOp2Fn[op - kMinSignOp](num, kFDummy);
+    if (lbp >= 0 && sign2optype(op) == SignType::OPL && !std::isnan(lhs)) {
+        return kMapOp2Fn[op - kMinSignOp](lhs, kFDummy);
     }
     throw std::runtime_error("Invalid chain: cannot step");
 }
 
 std::shared_ptr<expr::Chain>
 expr::reduce(const std::shared_ptr<expr::Chain> &car) {
-    if (car->next == nullptr && sign2optype(car->op) == SignType::NONE) {
+    if (car->rhs == nullptr && sign2optype(car->op) == SignType::NONE) {
         return car;
     }
-    if (car->next == nullptr && sign2optype(car->op) == SignType::OPL) {
+    if (car->rhs == nullptr && sign2optype(car->op) == SignType::OPL) {
         return std::make_shared<expr::Chain>(
             expr::Chain(static_cast<uint8_t>(ChainState::LHS_NUL_NUL), 0, 0, 0,
                         car->Step(), nullptr));
     }
-    auto cdr = car->next;
+    auto cdr = car->rhs;
     try {
-        cdr->num = car->Step();
+        cdr->lhs = car->Step();
         return cdr;
     } catch (const std::runtime_error &) {
-        auto c = expr::Chain(car->state, car->op, car->lbp, car->rbp, car->num,
+        auto c = expr::Chain(car->state, car->op, car->lbp, car->rbp, car->lhs,
                              reduce(cdr));
         return std::make_shared<expr::Chain>(c);
     }
@@ -503,12 +481,12 @@ expr::reduce(const std::shared_ptr<expr::Chain> &car) {
 float expr::eval(const std::shared_ptr<Chain> &chain) {
     auto c = chain;
     while (true) {
-        if (c->next == nullptr && sign2optype(c->op) == SignType::NONE) {
+        if (c->rhs == nullptr && sign2optype(c->op) == SignType::NONE) {
             break;
         }
         c = reduce(c);
     }
-    return c->num;
+    return c->lhs;
 }
 
 float expr::eval(const char *str) {

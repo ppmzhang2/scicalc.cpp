@@ -42,12 +42,12 @@ namespace expr {
         uint8_t op;    // IMP: enum class Sign
         uint8_t lbp;
         uint8_t rbp;
-        float num;
-        std::shared_ptr<Chain> next;
+        float lhs;
+        std::shared_ptr<Chain> rhs;
 
         Chain(uint8_t s, uint8_t o, uint8_t lbp, uint8_t rbp, float n,
               std::shared_ptr<Chain> z)
-            : state(s), op(o), lbp(lbp), rbp(rbp), num(n), next(std::move(z)) {}
+            : state(s), op(o), lbp(lbp), rbp(rbp), lhs(n), rhs(std::move(z)) {}
 
         std::string ToStr() const;
 
