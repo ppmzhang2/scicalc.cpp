@@ -25,9 +25,11 @@ set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fuse-ld=lld")
 # define sources and headers
 set(SOURCES
     "${SciCalc_SOURCE_DIR}/src/main.cpp"
+    "${SciCalc_SOURCE_DIR}/src/exam.cpp"
     "${SciCalc_SOURCE_DIR}/src/expr.cpp"
 )
 set(HEADERS
+    "${SciCalc_SOURCE_DIR}/include/exam.hpp"
     "${SciCalc_SOURCE_DIR}/include/expr.hpp"
 )
 
@@ -67,10 +69,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
        CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
     message(STATUS "Building for Linux x86-64")
-    include("./cmake/CMakeLists_x64.cmake")
+    include("./cmake/CMakeLists_nix.cmake")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+       CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+    message(STATUS "Building for Linux aarch64")
+    include("./cmake/CMakeLists_nix.cmake")
 else()
     message(FATAL_ERROR
-        "Unsupported operating system or architecture: ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}")
+        "Unsupported operating system or architecture:
+        ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
 # Additional common configuration (if any) can be added here

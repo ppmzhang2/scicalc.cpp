@@ -69,9 +69,11 @@ namespace {
     // map Operator to function
     static const std::array<float (*)(const float, const float), kOpSize>
         kMapOp2Fn{
-            [](float a, float) { return std::tgamma(a + 1); }, // kMinSignOpU
-            [](float a, float) { return std::log(a); },        // LOG
-            [](float a, float b) { return a + b; }, // ADD (kMinSignOpI)
+            // factorial (kMinSignOp)
+            [](float a, float) { return std::tgamma(a + 1); }, 
+            // log, exclude 0 and negative values
+            [](float a, float) { return (a > 0) ? std::log(a) : kFNan; },
+            [](float a, float b) { return a + b; }, 
             [](float a, float b) { return a - b; }, // SUB
             [](float a, float b) { return a * b; }, // MUL
             [](float a, float b) { return a / b; }, // DIV
