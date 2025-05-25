@@ -25,9 +25,11 @@ set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fuse-ld=lld")
 # define sources and headers
 set(SOURCES
     "${SciCalc_SOURCE_DIR}/src/main.cpp"
+    "${SciCalc_SOURCE_DIR}/src/exam.cpp"
     "${SciCalc_SOURCE_DIR}/src/expr.cpp"
 )
 set(HEADERS
+    "${SciCalc_SOURCE_DIR}/include/exam.hpp"
     "${SciCalc_SOURCE_DIR}/include/expr.hpp"
 )
 

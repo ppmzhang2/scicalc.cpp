@@ -2,10 +2,11 @@
 #include <atomic>
 #include <csignal>
 #include <iostream>
-#include <optional>
-#include <random>
 
+#include "exam.hpp"
 #include "expr.hpp"
+
+static constexpr float EPSILON = 1e-3f;
 
 std::atomic<bool> flag_int(false);
 
@@ -18,6 +19,7 @@ std::string sanitize_input(const std::string &input) {
     return ret;
 }
 
+// Returns false if interrupted, true if input is successfully read
 bool safe_getline(std::string &out, std::atomic<bool> &interrupted) {
     if (!std::getline(std::cin, out)) {
         if (interrupted) {
@@ -31,6 +33,30 @@ bool safe_getline(std::string &out, std::atomic<bool> &interrupted) {
         }
     }
     return true;
+}
+
+// Function to fetch an integer with validation and retry support
+float get_num(const std::string &prompt,
+              const std::function<bool(float)> &validate,
+              std::atomic<bool> &interrupted) {
+    std::string input;
+    while (true) {
+        std::cout << prompt;
+        if (!safe_getline(input, interrupted)) {
+            std::cout << "Input interrupted. Try again.\n";
+            continue; // Retry prompt if interrupted
+        }
+        try {
+            float value = std::stof(input);
+            if (validate(value)) {
+                return value;
+            } else {
+                std::cerr << "Invalid value. Try again.\n";
+            }
+        } catch (std::exception &ex) {
+            std::cerr << "Invalid input: " << ex.what() << ". Try again.\n";
+        }
+    }
 }
 
 int main() {
@@ -62,57 +88,67 @@ int main() {
         }
 
         else if (input == "exam") {
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<> dist(2, 9);
+            std::string s_op;
 
-            std::vector<std::pair<int, int>> questions;
-            std::vector<std::optional<int>> user_answers(10);
-
-            // Generate all questions first
-            for (int i = 0; i < 10; ++i) {
-                questions.emplace_back(dist(gen), dist(gen));
+            // Prompt for operators
+            std::cout
+                << "Enter operators separated by commas (e.g., +, -, *): ";
+            if (!safe_getline(s_op, flag_int)) {
+                std::cout << "Aborted exam setup." << std::endl;
+                continue;
             }
 
-            for (int i = 0; i < 10;) {
-                int a = questions[i].first;
-                int b = questions[i].second;
+            // Prompt for number of quizzes
+            const uint8_t n = get_num(
+                "Enter number of quizzes: ", [](int v) { return v >= 1; },
+                flag_int);
+            // Prompt for number of operands
+            const uint8_t n_opd = get_num(
+                "Enter number of operands (2 or more): ",
+                [](int v) { return v >= 2; }, flag_int);
+            const int min_opd = get_num(
+                "Enter minimum operand value: ", [](int v) { return v >= 2; },
+                flag_int);
+            const int max_opd = get_num(
+                "Enter maximum operand value: ",
+                [min_opd](int v) { return v > min_opd; }, flag_int);
 
-                std::cout << "Question " << (i + 1) << ": " << a << " * " << b
-                          << " = ";
-                std::string answer_str;
-                if (!safe_getline(answer_str, flag_int)) {
-                    std::cout << "\nRestarting question..." << std::endl;
-                    continue; // re-prompt the same question
-                }
+            std::vector<std::optional<float>> arr_ansusr(n);
+            std::vector<float> arr_ansexp(n);
+            std::vector<std::string> arr_expr(n);
 
-                try {
-                    user_answers[i] = std::stoi(answer_str);
-                    ++i;
-                } catch (std::exception &ex) {
-                    std::cerr << "Invalid input: " << ex.what()
-                              << ". Please enter a number." << std::endl;
-                }
+            // Generate expressions and store correct answers
+            for (int i = 0; i < n; ++i) {
+                std::string s_expr =
+                    exam::rand_expr(s_op, n_opd, min_opd, max_opd);
+                arr_expr[i] = s_expr;
+                arr_ansexp[i] = expr::eval(s_expr.c_str());
+            }
+
+            // Get user answers
+            for (int i = 0; i < n;) {
+                float ans_usr = get_num(
+                    "Quiz " + std::to_string(i + 1) + ": " + arr_expr[i] +
+                        " = ",
+                    [](int) { return true; }, flag_int);
+                arr_ansusr[i] = ans_usr;
+                ++i;
             }
 
             // Display results after all answers are collected
-            int correct_count = 0;
+            int cnt_correct = 0;
             std::cout << "\nExam Results:\n";
-            for (int i = 0; i < 10; ++i) {
-                int a = questions[i].first;
-                int b = questions[i].second;
-                int correct_answer = a * b;
+            for (int i = 0; i < n; ++i) {
 
-                std::cout << "Question " << (i + 1) << ": " << a << " * " << b
-                          << " = ";
-                if (user_answers[i].has_value()) {
-                    int user_answer = user_answers[i].value();
-                    std::cout << user_answer;
-                    if (user_answer == correct_answer) {
+                std::cout << "Quiz " << (i + 1) << ": " << arr_expr[i] << " = ";
+                if (arr_ansusr[i].has_value()) {
+                    const float ans_usr = arr_ansusr[i].value();
+                    std::cout << ans_usr;
+                    if (std::abs(ans_usr - arr_ansexp[i]) < EPSILON) {
                         std::cout << " ✅" << std::endl;
-                        ++correct_count;
+                        ++cnt_correct;
                     } else {
-                        std::cout << " ❌. Correct answer is " << correct_answer
+                        std::cout << " ❌. Correct answer " << arr_ansexp[i]
                                   << std::endl;
                     }
                 } else {
@@ -120,8 +156,8 @@ int main() {
                 }
             }
 
-            std::cout << "You got " << correct_count << " out of 10 correct."
-                      << std::endl;
+            std::cout << "You got " << cnt_correct << " out of " << n
+                      << " questions." << std::endl;
             continue;
         }
 
